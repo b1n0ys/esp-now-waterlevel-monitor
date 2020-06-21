@@ -22,6 +22,8 @@ typedef struct struct_message {
 // Create a struct_message called myData
 struct_message myData;
 
+uint16_t last_time_value_changed = 0;
+
 void setup() {
 
   pinMode(buzzPin, OUTPUT);
@@ -49,6 +51,9 @@ void setup() {
   // get recv packer info
   esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
   esp_now_register_recv_cb(OnDataRecv);
+
+  //initializing value changed to keep display active for atleast 10 seconds
+  last_time_value_changed = millis() + 5000;
 }
 
 // Callback function that will be executed when data is received
@@ -66,10 +71,9 @@ void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
 }
 
 
-
-uint16_t time_elapsed = 0;
 uint16_t buzz_start = 0;
 boolean in_buzzing_state = false;
+
 
 void start_buzz() {
 
@@ -85,18 +89,35 @@ void start_buzz() {
 
 void check_and_quiet() {
 
+  boolean value_stoped_changing = false;
+  if (millis() - last_time_value_changed > 1000) {
 
-  time_elapsed = millis() - buzz_start;
-  //Serial.print("quiet ....");
-  //Serial.println(time_elapsed);
-
-  if (time_elapsed > 500) {
+    Serial.print("value last changed 1 sec ago , turning buzzer off");
     digitalWrite(buzzPin, LOW);
+
+  }else {
+
+    uint16_t time_elapsed = millis() - buzz_start;
+    if (time_elapsed > 500 ) {
+      digitalWrite(buzzPin, LOW);
+    }
+
+    //leave a delay for buzing to resume
+    if (time_elapsed > 1000) {
+      in_buzzing_state = false;
+    }
   }
 
-  //leave a delay for buzing to resume
-  if (time_elapsed > 1000) {
-    in_buzzing_state = false;
+}
+
+void check_and_turnoff_display() {
+
+  //if there is no activity for 5 seconds turning off display.
+  if (millis() - last_time_value_changed > 5000) {
+
+    Serial.print("value last changed 5 sec ago , turning display off");
+    display.clear();
+    display.display();
   }
 
 }
@@ -133,7 +154,7 @@ void loop() {
         Serial.print(", distance_to_fill = " + String(distance_to_fill));
         Serial.print(", prev_distance_to_fill = " + String(prev_distance_to_fill));
 
-        if ( distance_to_fill != prev_distance_to_fill) {
+        if ( hasChanged(distance_to_fill, prev_distance_to_fill)) {
           updateDisplay();
         }
         prev_distance_to_fill = distance_to_fill;
@@ -153,7 +174,7 @@ void loop() {
       Serial.print(", distance_to_empty = " + String(distance_to_empty));
       Serial.print(", prev_distance_to_empty = " + String(prev_distance_to_empty));
 
-      if ( distance_to_empty != prev_distance_to_empty) {
+      if ( hasChanged(distance_to_empty, prev_distance_to_empty)) {
         updateDisplay();
       }
       prev_distance_to_empty = distance_to_empty;
@@ -161,8 +182,22 @@ void loop() {
     }
 
     check_and_quiet();
+    check_and_turnoff_display();
     delay(500);
   }
+
+}
+
+boolean hasChanged( int currentValue, int prevValue) {
+
+  //tolerance of 2
+  if ( abs(currentValue - prevValue) > 2) {
+
+    last_time_value_changed = millis();
+    return true;
+  }
+
+  return false;
 
 }
 
