@@ -2,7 +2,8 @@
 #include <ESP8266WiFi.h>
 #include <espnow.h>
 
-#define BOARD_ID 1
+//exact same code except for the BOARD_ID would work for the second sensor
+#define BOARD_ID 2
 
 const int trigPin = D2 ; 
 const int echoPin = D0;
