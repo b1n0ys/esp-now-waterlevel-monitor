@@ -6,7 +6,7 @@
 const int MAX_DISTANCE = 62; //Sump tank
 const int MIN_LEVEL = 2;
 
-const int MIN_DISTANCE = 10; //Overhead tank
+const int MIN_DISTANCE = 15; //Overhead tank
 
 // Initialize the OLED display using Wire library
 SSD1306Wire  display(0x3c, D2, D1);  //D2=SDK  D1=SCK  As per labeling on NodeMCU
@@ -15,190 +15,158 @@ const int buzzPin = D5;
 // Structure example to receive data
 // Must match the sender structure
 typedef struct struct_message {
-  int id;
-  float distance;
+    int id;
+    float distance;
 } struct_message;
 
 // Create a struct_message called myData
 struct_message myData;
 
-uint16_t last_time_value_changed = 0;
-
 void setup() {
 
-  pinMode(buzzPin, OUTPUT);
-  Serial.begin(115200);
-  Serial.println("");
+    pinMode(buzzPin, OUTPUT);
+    Serial.begin(115200);
+    Serial.println("");
 
-  delay(1000);
-  Serial.println("Initializing OLED Display");
-  display.init();
+    delay(1000);
+    Serial.println("Initializing OLED Display");
+    display.init();
 
-  display.flipScreenVertically();
-  display.setFont(ArialMT_Plain_24);
+    display.flipScreenVertically();
+    display.setFont(ArialMT_Plain_24);
 
-  // Set device as a Wi-Fi Station
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
+    // Set device as a Wi-Fi Station
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
 
-  // Init ESP-NOW
-  if (esp_now_init() != 0) {
-    Serial.println("Error initializing ESP-NOW");
-    return;
-  }
+    // Init ESP-NOW
+    if (esp_now_init() != 0) {
+        Serial.println("Error initializing ESP-NOW");
+        return;
+    }
 
-  // Once ESPNow is successfully Init, we will register for recv CB to
-  // get recv packer info
-  esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
-  esp_now_register_recv_cb(OnDataRecv);
-
-  //initializing value changed to keep display active for atleast 10 seconds
-  last_time_value_changed = millis() + 5000;
+    // Once ESPNow is successfully Init, we will register for recv CB to
+    // get recv packer info
+    esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
+    esp_now_register_recv_cb(OnDataRecv);
 }
+
+int distance_to_fill = 0; // overhead tank
+int distance_to_empty = 0; // sump tank
 
 // Callback function that will be executed when data is received
 void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
 
-  memcpy(&myData, incomingData, sizeof(myData));
-  //Serial.print("Bytes received: ");
-  //Serial.println(len);
+    memcpy(&myData, incomingData, sizeof(myData));
 
-  if ( millis() % 1000 < 10) { //write once in a while
-    Serial.print(myData.id);
-    Serial.print("]: distance = ");
-    Serial.println(myData.distance);
-  }
-}
+    if (myData.id == 1) {
 
+        distance_to_fill = ceil(myData.distance);
 
-uint16_t buzz_start = 0;
-boolean in_buzzing_state = false;
+    } else if (myData.id == 2) {
 
-
-void start_buzz() {
-
-  if (!in_buzzing_state) {
-
-    in_buzzing_state = true;
-    buzz_start = millis();
-    Serial.println("buzing ....");
-    digitalWrite(buzzPin, HIGH);
-  }
-
-}
-
-void check_and_quiet() {
-
-  boolean value_stoped_changing = false;
-  if (millis() - last_time_value_changed > 1000) {
-
-    Serial.print("value last changed 1 sec ago , turning buzzer off");
-    digitalWrite(buzzPin, LOW);
-
-  }else {
-
-    uint16_t time_elapsed = millis() - buzz_start;
-    if (time_elapsed > 500 ) {
-      digitalWrite(buzzPin, LOW);
+        int level = MAX_DISTANCE - ceil(myData.distance);
+        distance_to_empty = max(level, 0);
     }
-
-    //leave a delay for buzing to resume
-    if (time_elapsed > 1000) {
-      in_buzzing_state = false;
-    }
-  }
-
-}
-
-void check_and_turnoff_display() {
-
-  //if there is no activity for 5 seconds turning off display.
-  if (millis() - last_time_value_changed > 5000) {
-
-    Serial.print("value last changed 5 sec ago , turning display off");
-    display.clear();
-    display.display();
-  }
 
 }
 
 boolean start_up = true;
-int distance = 0;
-int level = 0;
-
-int distance_to_empty = 0; // sump tank
-int distance_to_fill = 0; // overhead tank
-
-int prev_distance_to_empty = 0;
+uint16_t buzz_start = 0;
+boolean in_buzzing_state = false;
 int prev_distance_to_fill = 0;
+int prev_distance_to_empty = 0;
+
 
 void loop() {
 
-  if (start_up) {
+    if (start_up) {
 
-    displayWrite("Hello");
-    delay(1000);
-    start_up = false;
+        displayWrite("Hello");
+        delay(1000);
+        start_up = false;
 
-  }else {
+    } else {
 
-    if (myData.id == 1) {
 
-        Serial.print("inside borad 1 reading");
-
-        distance_to_fill = ceil(myData.distance);
-        if (distance_to_fill < MIN_DISTANCE) {
-          start_buzz();
-        }
-
-        Serial.print(", distance_to_fill = " + String(distance_to_fill));
-        Serial.print(", prev_distance_to_fill = " + String(prev_distance_to_fill));
+        boolean refresh_display = false;
 
         if ( hasChanged(distance_to_fill, prev_distance_to_fill)) {
-          updateDisplay();
+
+            Serial.println("distance_to_fill = " + String(distance_to_fill));
+            refresh_display = true;
+
+            if (distance_to_fill < MIN_DISTANCE) {
+                start_buzz();
+            }
+
+            prev_distance_to_fill = distance_to_fill;
         }
-        prev_distance_to_fill = distance_to_fill;
-        Serial.println("..done");
 
-    }else if (myData.id == 2) {
 
-      Serial.print("inside borad 2 reading");
+        if ( hasChanged(distance_to_empty, prev_distance_to_empty)) {
 
-      distance_to_empty = MAX_DISTANCE - floor(myData.distance);
-      if (distance_to_empty < 0) distance_to_empty = 0;
+            Serial.println("distance_to_empty = " + String(distance_to_empty));
+            refresh_display = true;
 
-      if (distance_to_empty < MIN_LEVEL && distance_to_empty != 0) {
-        start_buzz();
-      }
+            if (distance_to_empty < MIN_LEVEL && distance_to_empty != 0) {
+                start_buzz();
+            }
 
-      Serial.print(", distance_to_empty = " + String(distance_to_empty));
-      Serial.print(", prev_distance_to_empty = " + String(prev_distance_to_empty));
+            prev_distance_to_empty = distance_to_empty;
+        }
 
-      if ( hasChanged(distance_to_empty, prev_distance_to_empty)) {
-        updateDisplay();
-      }
-      prev_distance_to_empty = distance_to_empty;
+        if (refresh_display) {
+            updateDisplay();
+        }
 
+        check_and_quiet();
+        delay(500);
     }
-
-    check_and_quiet();
-    check_and_turnoff_display();
-    delay(500);
-  }
 
 }
 
 boolean hasChanged( int currentValue, int prevValue) {
 
-  //tolerance of 2
-  if ( abs(currentValue - prevValue) > 2) {
+   //a tolerance of 1
+    if ( abs(currentValue - prevValue) > 1) {
+        return true;
+    }
+    return false;
+}
 
-    last_time_value_changed = millis();
-    return true;
-  }
 
-  return false;
+void start_buzz() {
 
+    if (!in_buzzing_state) {
+
+        in_buzzing_state = true;
+        buzz_start = millis();
+        Serial.println("buzing ....");
+        digitalWrite(buzzPin, HIGH);
+    }
+
+}
+
+void check_and_quiet() {
+
+    if (in_buzzing_state) {
+
+        uint16_t time_elapsed = millis() - buzz_start;
+        if (time_elapsed > 500 ) {
+
+            Serial.println("turning buzzer off for 0.5 sec");
+            digitalWrite(buzzPin, LOW);
+        }
+
+        //leave a delay for buzing to resume
+        if (time_elapsed > 1000) {
+
+            Serial.println("turning buzzing state off");
+            in_buzzing_state = false;
+        }
+
+    }
 }
 
 void displayWrite(String str) {
@@ -211,8 +179,8 @@ void displayWrite(String str) {
 void updateDisplay() {
 
     display.clear();
-    display.setFont(ArialMT_Plain_10);
-    display.drawString(0, 0, "[" +String(myData.id) + "] " + String(myData.distance) + "cm");
+    //display.setFont(ArialMT_Plain_10);
+    //display.drawString(0, 0, "[" + String(myData.id) + "] " + String(myData.distance) + "cm");
 
     display.setFont(ArialMT_Plain_16);
     display.drawString(0, 20, "to fill:" );
